@@ -1341,6 +1341,7 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
     skip_autoload=False,
     skip_iswap=False,
     skip_core96_head=False,
+    skip_machine_setup=False,
   ):
     """Creates a USB connection and finds read/write interfaces.
 
@@ -1348,6 +1349,10 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
       skip_autoload: if True, skip initializing the autoload module, if applicable.
       skip_iswap: if True, skip initializing the iSWAP module, if applicable.
       skip_core96_head: if True, skip initializing the CoRe 96 head module, if applicable.
+      skip_machine_setup: if True, skip the machine setup procedure. This is useful for debugging
+        or recovering from error states. The machine configuration will still be requested. No
+        module will be initialized. In essenece, only the USB connection will be established
+        and the machine configuration will be requested.
     """
 
     await super().setup()
@@ -1375,53 +1380,54 @@ class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
 
     initialized = await self.request_instrument_initialization_status()
 
-    if not initialized:
-      logger.info("Running backend initialization procedure.")
+    if not skip_machine_setup:
+      if not initialized:
+        logger.info("Running backend initialization procedure.")
 
-      await self.pre_initialize_instrument()
+        await self.pre_initialize_instrument()
 
-    if not initialized or any(tip_presences):
-      dy = (4050 - 2175) // (self.num_channels - 1)
-      y_positions = [4050 - i * dy for i in range(self.num_channels)]
+      if not initialized or any(tip_presences):
+        dy = (4050 - 2175) // (self.num_channels - 1)
+        y_positions = [4050 - i * dy for i in range(self.num_channels)]
 
-      await self.initialize_pipetting_channels(
-        x_positions=[self.extended_conf["xw"]],  # Tip eject waste X position.
-        y_positions=y_positions,
-        begin_of_tip_deposit_process=int(self._channel_traversal_height * 10),
-        end_of_tip_deposit_process=1220,
-        z_position_at_end_of_a_command=3600,
-        tip_pattern=[True] * self.num_channels,
-        tip_type=4,  # TODO: get from tip types
-        discarding_method=0,
-      )
-
-    if self.autoload_installed and not skip_autoload:
-      autoload_initialized = await self.request_autoload_initialization_status()
-      if not autoload_initialized:
-        await self.initialize_autoload()
-
-      await self.park_autoload()
-
-    if self.iswap_installed and not skip_iswap:
-      iswap_initialized = await self.request_iswap_initialization_status()
-      if not iswap_initialized:
-        await self.initialize_iswap()
-
-      await self.park_iswap(
-        minimum_traverse_height_at_beginning_of_a_command=int(self._iswap_traversal_height * 10)
-      )
-
-    if self.core96_head_installed and not skip_core96_head:
-      core96_head_initialized = await self.request_core_96_head_initialization_status()
-      if not core96_head_initialized:
-        await self.initialize_core_96_head(
-          trash96=self.deck.get_trash_area96(),
-          z_position_at_the_command_end=self._channel_traversal_height,
+        await self.initialize_pipetting_channels(
+          x_positions=[self.extended_conf["xw"]],  # Tip eject waste X position.
+          y_positions=y_positions,
+          begin_of_tip_deposit_process=int(self._channel_traversal_height * 10),
+          end_of_tip_deposit_process=1220,
+          z_position_at_end_of_a_command=3600,
+          tip_pattern=[True] * self.num_channels,
+          tip_type=4,  # TODO: get from tip types
+          discarding_method=0,
         )
 
-    # After setup, STAR will have thrown out anything mounted on the pipetting channels, including
-    # the core grippers.
-    self._core_parked = True
+      if self.autoload_installed and not skip_autoload:
+        autoload_initialized = await self.request_autoload_initialization_status()
+        if not autoload_initialized:
+          await self.initialize_autoload()
+
+        await self.park_autoload()
+
+      if self.iswap_installed and not skip_iswap:
+        iswap_initialized = await self.request_iswap_initialization_status()
+        if not iswap_initialized:
+          await self.initialize_iswap()
+
+        await self.park_iswap(
+          minimum_traverse_height_at_beginning_of_a_command=int(self._iswap_traversal_height * 10)
+        )
+
+      if self.core96_head_installed and not skip_core96_head:
+        core96_head_initialized = await self.request_core_96_head_initialization_status()
+        if not core96_head_initialized:
+          await self.initialize_core_96_head(
+            trash96=self.deck.get_trash_area96(),
+            z_position_at_the_command_end=self._channel_traversal_height,
+          )
+
+      # After setup, STAR will have thrown out anything mounted on the pipetting channels, including
+      # the core grippers.
+      self._core_parked = True
 
   # ============== LiquidHandlerBackend methods ==============
 
